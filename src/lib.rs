@@ -1,3 +1,5 @@
+use rand::random;
+
 pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGHT: usize = 32;
 
@@ -108,12 +110,12 @@ impl Emulator {
         }
     }
 
-    fn execute(&mut self, op: u16) {
+    fn execute(&mut self, operation: u16) {
         // separate out hex digits (bytes) of the opcode
-        let first_byte = (op & 0xF000) >> 12;
-        let second_byte = (op & 0xF000) >> 8;
-        let third_byte = (op & 0xF000) >> 4;
-        let fourth_byte = op & 0xF000;
+        let first_byte = (operation & 0xF000) >> 12;
+        let second_byte = (operation & 0xF000) >> 8;
+        let third_byte = (operation & 0xF000) >> 4;
+        let fourth_byte = operation & 0xF000;
         // figure out what opcode it is
         match (first_byte, second_byte, third_byte, fourth_byte) {
             // 0000 - NOP (no op)
@@ -130,19 +132,19 @@ impl Emulator {
             }
             // 1NNN - JMP NNN (jump)
             (1, _, _, _) => {
-                let jump_address = op & 0xfff; // NNN
+                let jump_address = operation & 0xfff; // NNN
                 self.program_counter = jump_address;
             }
             // 2NNN - CALL NNN (call subroutine)
             (2, _, _, _) => {
-                let call_address = op & 0xfff; // NNN
+                let call_address = operation & 0xfff; // NNN
                 self.push(self.program_counter);
                 self.program_counter = call_address;
             }
             // 3XNN - SKIP NEXT IF VX == NN (if equals)
             (3, _, _, _) => {
                 let x = second_byte as usize;
-                let nn = (op & 0xff) as u8; // NN
+                let nn = (operation & 0xff) as u8; // NN
                 if self.v_register[x] == nn {
                     self.program_counter += 2;
                 }
@@ -150,7 +152,7 @@ impl Emulator {
             // 4XNN - SKIP NEXT IF VX == NN (if not equal)
             (4, _, _, _) => {
                 let x = second_byte as usize;
-                let nn = (op & 0xff) as u8; // nn
+                let nn = (operation & 0xff) as u8; // nn
                 if self.v_register[x] != nn {
                     self.program_counter += 2;
                 }
@@ -164,11 +166,133 @@ impl Emulator {
                     self.program_counter += 2;
                 }
             }
-            // 6XNN - VX == NN
-            (6, _, _, _) => {}
 
-            // 6XNN - VX = NN (set v register at the second digit X to the provide value NN)
-            (_, _, _, _) => unimplemented!("Opcode not yet implemented: {}", op),
+            // 6XNN - VX == NN (set v register at the second digit X to the provide value NN)
+            (6, _, _, _) => {
+                let x = second_byte as usize;
+                let nn = (operation & 0xff) as u8; // nn
+                self.v_register[x] = nn;
+            }
+
+            // 7XNN - VX += NN (add NN to v register at the second digit X)
+            (7, _, _, _) => {
+                let x = second_byte as usize;
+                let nn = (operation & 0xff) as u8; // nn
+                self.v_register[x] += nn;
+            }
+
+            // 8XY0 - VX = VY (Like the VX = NN operation, but the source value is from the VY register.)
+            (8, _, _, 0) => {
+                let x = second_byte as usize;
+                let y = third_byte as usize;
+                self.v_register[x] = self.v_register[y];
+            }
+
+            // 8XY1 - VX |= VY (Set VX to VX or VY)
+            (8, _, _, 1) => {
+                let x = second_byte as usize;
+                let y = third_byte as usize;
+                self.v_register[x] |= self.v_register[y];
+            }
+
+            // 8XY2 - VX &= VY (Set VX to VX and VY)
+            (8, _, _, 2) => {
+                let x = second_byte as usize;
+                let y = third_byte as usize;
+                self.v_register[x] &= self.v_register[y];
+            }
+
+            // 8XY3 - VX ^= VY (Set VX to VX xor VY)
+            (8, _, _, 3) => {
+                let x = second_byte as usize;
+                let y = third_byte as usize;
+                self.v_register[x] ^= self.v_register[y];
+            }
+
+            // 8XY4 - VX += VY (Add with carry, Set VX to VX + VY. Set VF = carry)
+            (8, _, _, 4) => {
+                let x = second_byte as usize;
+                let y = third_byte as usize;
+                let (new_vx, carry) = self.v_register[x].overflowing_add(self.v_register[y]);
+                let new_vf = if carry { 1 } else { 0 }; // set the carry flag if there was an overflow
+                self.v_register[x] = new_vx;
+                self.v_register[0xf] = new_vf;
+            }
+
+            // 8XY5 - VX -= VY (subtract with borrow, Set VX to VX - VY. Set VF = NOT borrow)
+            (8, _, _, 5) => {
+                let x = second_byte as usize;
+                let y = third_byte as usize;
+                let (new_vx, borrow) = self.v_register[x].overflowing_sub(self.v_register[y]);
+                let new_vf = if borrow { 0 } else { 1 };
+                self.v_register[x] = new_vx;
+                self.v_register[0xf] = new_vf;
+            }
+
+            // 8XY6 - VX >>= 1 (Right shift, Set VX to VX >> 1)
+            // stores the dropped bit in VF
+            (8, _, _, 6) => {
+                let x = second_byte as usize;
+                let least_significant_bit = self.v_register[x] & 1;
+                self.v_register[x] >>= 1; // shift the least significant bit to the right
+                self.v_register[0xf] = least_significant_bit;
+            }
+
+            // 8XY7 - VX = VY - VX (Subtract with borrow, Set VX to VY - VX. Set VF = NOT borrow)
+            // same as 8XY5 but subtracting VY from VX
+            (8, _, _, 7) => {
+                let x = second_byte as usize;
+                let y = third_byte as usize;
+                let (new_vx, borrow) = self.v_register[y].overflowing_sub(self.v_register[x]);
+                let new_vf = if borrow { 0 } else { 1 };
+                self.v_register[x] = new_vx;
+                self.v_register[0xf] = new_vf;
+            }
+
+            // 8XYE - VX <<= 1 (Left shift, Set VX to VX << 1)
+            // same as 8XY6 but shifting VX to the left (storing overflow in VF)
+            (8, _, _, 0xe) => {
+                let x = second_byte as usize;
+                let most_significant_bit = (self.v_register[x] >> 7) & 1;
+                self.v_register[x] <<= 1; // shift the most significant bit to the left
+                self.v_register[0xf] = most_significant_bit;
+            }
+
+            // 9XY0 - Skip next instruction if VX != VY
+            // same as 5xy0 but with inequality
+            (9, _, _, 0) => {
+                let x = second_byte as usize;
+                let y = third_byte as usize;
+                if self.v_register[x] != self.v_register[y] {
+                    self.program_counter += 2;
+                }
+            }
+
+            // ANNN - I = NNN
+            // set I register to the address NNN
+            (0xa, _, _, _) => {
+                let nnn = operation & 0xfff; // NNN
+                self.i_register = nnn;
+            }
+
+            // BNNN - PC = V0 + NNN
+            // jump to NNN + V0 (always uses V0)
+            // moves the PC to the sum of the value stored in V0 and the raw value 0xNNN supplied in the opcode
+            (0xb, _, _, _) => {
+                let nnn = operation & 0xfff; // NNN
+                self.program_counter = self.v_register[0] as u16 + nnn;
+            }
+
+            // CXNN - VX = random byte AND NN
+            // chip 8 random byte generator
+            (0xc, _, _, _) => {
+                let x = second_byte as usize;
+                let nn = (operation & 0xff) as u8; // NN
+                let random_byte: u8 = random();
+                self.v_register[x] = random_byte & nn;
+            }
+
+            (_, _, _, _) => unimplemented!("Opcode not yet implemented: {}", operation),
         }
     }
 }
