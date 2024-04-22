@@ -4,8 +4,9 @@ pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGHT: usize = 32;
 
 const RAM_SIZE: usize = 4096;
-const REGISTER_LENGTH: usize = 16;
+const NUM_REGISTERS: usize = 16;
 const STACK_SIZE: usize = 16;
+const NUM_KEYS: usize = 16;
 
 const START_ADDR: u16 = 0x200;
 
@@ -33,25 +34,27 @@ pub struct Emulator {
     program_counter: u16,
     ram: [u8; RAM_SIZE],
     screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
-    v_register: [u8; REGISTER_LENGTH],
+    v_register: [u8; NUM_REGISTERS],
     i_register: u16,
     stack: [u16; STACK_SIZE],
     stack_pointer: u16,
     delay_timer: u8,
     sound_timer: u8,
+    keys: [bool; NUM_KEYS],
 }
 impl Emulator {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let mut emulator = Self {
             program_counter: START_ADDR,
             ram: [0; RAM_SIZE],
             screen: [false; SCREEN_WIDTH * SCREEN_HEIGHT],
-            v_register: [0; REGISTER_LENGTH],
+            v_register: [0; NUM_REGISTERS],
             i_register: 0,
             stack_pointer: 0,
             stack: [0; STACK_SIZE],
             delay_timer: 0,
             sound_timer: 0,
+            keys: [false; NUM_KEYS],
         };
         emulator.ram[..FONTSET_SIZE].copy_from_slice(&FONTSET);
         emulator
@@ -71,7 +74,7 @@ impl Emulator {
         self.program_counter = START_ADDR;
         self.ram = [0; RAM_SIZE];
         self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
-        self.v_register = [0; REGISTER_LENGTH];
+        self.v_register = [0; NUM_REGISTERS];
         self.i_register = 0;
         self.stack_pointer = 0;
         self.stack = [0; STACK_SIZE];
@@ -110,6 +113,7 @@ impl Emulator {
         }
     }
 
+    // execute instructions (opcodes)
     fn execute(&mut self, operation: u16) {
         // separate out hex digits (bytes) of the opcode
         let first_byte = (operation & 0xF000) >> 12;
@@ -292,7 +296,165 @@ impl Emulator {
                 self.v_register[x] = random_byte & nn;
             }
 
+            //DXYN - draw sprite, at coordinates VX, VY, N bytes tall
+            (0xd, _, _, _) => {
+                let x_coordinate = self.v_register[second_byte as usize] as u16;
+                let y_coordinate = self.v_register[third_byte as usize] as u16;
+                let number_of_rows = fourth_byte;
+                let mut flipped = false;
+                for row in 0..number_of_rows {
+                    let address = self.i_register + row as u16;
+                    let pixels = self.ram[address as usize];
+                    for col in 0..8 {
+                        if (pixels & (0b1000_0000 >> col)) != 0 {
+                            // fetch current pixels bit (on or off using a mask
+                            let x = (x_coordinate + col) as usize % SCREEN_WIDTH;
+                            let y = (y_coordinate + row) as usize % SCREEN_HEIGHT;
+                            // get the index of the current pixel
+                            let index = x + y * SCREEN_WIDTH;
+                            // flip the pixel and set
+                            flipped |= self.screen[index];
+                            self.screen[index] ^= true;
+                        }
+                    }
+                }
+                if flipped {
+                    self.v_register[0xf] = 1;
+                } else {
+                    self.v_register[0xf] = 0;
+                }
+            }
+
+            // EX9E - Skip if key pressed
+            (0xe, _, 9, 0xe) => {
+                let x = second_byte as usize;
+                let vx = self.v_register[x];
+                let key = self.keys[vx as usize];
+                if key {
+                    self.program_counter += 2;
+                }
+            }
+
+            // EXA1 - Skip if key not pressed
+            (0xe, _, 0xa, 1) => {
+                let x = second_byte as usize;
+                let vx = self.v_register[x];
+                let key = self.keys[vx as usize];
+                if !key {
+                    self.program_counter += 2;
+                }
+            }
+
+            // FX07 - VX = delay timer
+            // ticks down each frame until it reaches zero, this instruction reads the value/state
+            // of the delay timer into VX
+            (0xf, _, 0, 7) => {
+                let x = second_byte as usize;
+                self.v_register[x] = self.delay_timer;
+            }
+
+            // FX0A - Wair for keypress (blocking)
+            // If more than one key is currently being pressed, it takes the lowest indexed one
+            (0xf, _, 0, 0xa) => {
+                let x = second_byte as usize;
+                let mut pressed = false;
+                for i in 0..self.keys.len() {
+                    if self.keys[i] {
+                        self.v_register[x] = i as u8;
+                        pressed = true;
+                        break;
+                    }
+                }
+                if !pressed {
+                    // jump back (this causes the endless loop to block the program)
+                    self.program_counter -= 2;
+                }
+            }
+
+            // FX15 - delay timer = VX
+            // allows for setting of the delay timer to the value stored in VX
+            (0xf, _, 1, 5) => {
+                let x = second_byte as usize;
+                self.delay_timer = self.v_register[x];
+            }
+
+            // FX18 - sound timer = VX
+            // allows for setting of the sound timer to the value stored in VX
+            (0xf, _, 1, 8) => {
+                let x = second_byte as usize;
+                self.sound_timer = self.v_register[x];
+            }
+
+            // FX1E - I += VX
+            // adds VX to whatever is stored in I
+            // In the case of an overflow, the register should simply roll over back to 0
+            (0xf, _, 1, 0xe) => {
+                let x = second_byte as usize;
+                let vx = self.v_register[x];
+                self.i_register = self.i_register.wrapping_add(vx as u16);
+            }
+
+            // FX29 Set I to font address
+            // sets I to the location of the sprite for the value stored in VX
+            (0xf, _, 2, 9) => {
+                let x = second_byte as usize;
+                self.i_register = self.v_register[x] as u16 * 5;
+            }
+
+           // FX33 - I = BCD of VX
+           // stores the binary-coded decimal representation of VX, with the most significant digit in I
+            (0xf, _, 3, 3) => {
+                let x = second_byte as usize;
+                let vx = self.v_register[x] as f32; // not optimal, easy
+                // divide by 100 and lose the remainder
+                let hundreds = (vx / 100.0).floor() as u8;
+                // divide by 10, loce the 'ones' digit and the remainder
+                let tens = ((vx / 10.0) % 10.0).floor() as u8;
+                // the 'ones' digit is the remainder
+                let ones = (vx % 10.0).floor() as u8;
+
+                // store the BCD into RAM, beginning at the address currently in the I Register and moving alon
+                self.ram[self.i_register as usize] = hundreds;
+                self.ram[(self.i_register + 1) as usize] = tens;
+                self.ram[(self.i_register + 2) as usize] = ones;
+            }
+
+            // FX55 - Store V0 to VX in memory starting at I
+            (0xf, _, 5, 5) => {
+                let x = second_byte as usize;
+                let i = self.i_register as usize;
+                for index in 0..=x {
+                    self.ram[i + index] = self.v_register[index];
+                }
+            }
+
+            // FX65 - Load I into V0 to VX from memory
+            (0xf, _, 6, 5) => {
+                let x = second_byte as usize;
+                let i = self.i_register as usize;
+                for index in 0..=x {
+                    self.v_register[index] = self.ram[i + index];
+                }
+            }
+
             (_, _, _, _) => unimplemented!("Opcode not yet implemented: {}", operation),
         }
+    }
+
+    pub fn get_display(&self) -> &[bool] {
+        //  passes a pointer to then screen buffer up to the frontend
+        &self.screen
+    }
+
+    pub fn keypress(&mut self, index: usize, pressed: bool) {
+        // sets key as pressed or not
+        self.keys[index] = pressed;
+    }
+
+    pub fn load(&mut self, data: &[u8]) {
+        // loads data into the RAM
+        let start = START_ADDR as usize;
+        let end = (START_ADDR as usize) + data.len();
+        self.ram[start..end].copy_from_slice(data);
     }
 }
