@@ -1,5 +1,6 @@
 use chip_eight_emu::*;
 use sdl2::event::Event;
+use sdl2::keyboard::{Keycode, Scancode};
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
@@ -8,9 +9,10 @@ use std::env;
 use std::fs::File;
 use std::io::Read;
 
-const SCALE: u32 = 20;
+const SCALE: u32 = 15;
 const WINDOW_WIDTH: u32 = SCREEN_WIDTH as u32 * SCALE;
 const WINDOW_HEIGHT: u32 = SCREEN_HEIGHT as u32 * SCALE;
+const TICKS_PER_FRAME: usize = 10;
 fn main() {
     // parse command line arguments
     let args: Vec<String> = env::args().collect();
@@ -18,10 +20,14 @@ fn main() {
         println!("Usage: {} <file>", args[0]);
         return;
     }
+
+    // Load the ROM
     let mut file = File::open(&args[1]).expect("Unable to open file, make sure it exists");
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer).unwrap();
     let rom = buffer;
+    let mut chip_eight = Emulator::new();
+    chip_eight.load(&rom);
 
     // Create an SDL2 window
     let sdl_context = sdl2::init().unwrap();
@@ -38,8 +44,6 @@ fn main() {
 
     // Run the emulator
     let mut event_pump = sdl_context.event_pump().unwrap();
-    let mut chip_eight = Emulator::new();
-    chip_eight.load(&rom);
 
     // Game loop
     'gameloop: loop {
@@ -51,7 +55,10 @@ fn main() {
                 _ => {}
             }
         }
-        chip_eight.tick(); //execute next instruction (move program counter)
+        for _ in 0..TICKS_PER_FRAME {
+            chip_eight.tick(); //execute next instruction (move program counter)
+        }
+        chip_eight.tick_timers();
         draw_screen(&chip_eight, &mut canvas);
     }
 }
@@ -77,23 +84,8 @@ impl Keys {
             c: false,
         }
     }
-    fn read(rl: &prelude::RaylibHandle) -> Self {
-        let up = rl.is_key_down(raylib::consts::KeyboardKey::KEY_UP);
-        let down = rl.is_key_down(raylib::consts::KeyboardKey::KEY_DOWN);
-        let left = rl.is_key_down(raylib::consts::KeyboardKey::KEY_LEFT);
-        let right = rl.is_key_down(raylib::consts::KeyboardKey::KEY_RIGHT);
-        let a = rl.is_key_down(raylib::consts::KeyboardKey::KEY_A);
-        let b = rl.is_key_down(raylib::consts::KeyboardKey::KEY_B);
-        let c = rl.is_key_down(raylib::consts::KeyboardKey::KEY_C);
-        Self {
-            up,
-            down,
-            left,
-            right,
-            a,
-            b,
-            c,
-        }
+    fn read() -> Self {
+        todo!();
     }
 }
 

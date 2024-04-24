@@ -36,11 +36,11 @@ pub struct Emulator {
     screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
     v_register: [u8; NUM_REGISTERS],
     i_register: u16,
-    stack: [u16; STACK_SIZE],
     stack_pointer: u16,
+    stack: [u16; STACK_SIZE],
+    keys: [bool; NUM_KEYS],
     delay_timer: u8,
     sound_timer: u8,
-    keys: [bool; NUM_KEYS],
 }
 impl Emulator {
     pub fn new() -> Self {
@@ -52,9 +52,9 @@ impl Emulator {
             i_register: 0,
             stack_pointer: 0,
             stack: [0; STACK_SIZE],
+            keys: [false; NUM_KEYS],
             delay_timer: 0,
             sound_timer: 0,
-            keys: [false; NUM_KEYS],
         };
         emulator.ram[..FONTSET_SIZE].copy_from_slice(&FONTSET);
         emulator
@@ -78,6 +78,7 @@ impl Emulator {
         self.i_register = 0;
         self.stack_pointer = 0;
         self.stack = [0; STACK_SIZE];
+        self.keys = [false; NUM_KEYS];
         self.delay_timer = 0;
         self.sound_timer = 0;
         self.ram[..FONTSET_SIZE].copy_from_slice(&FONTSET);
@@ -85,10 +86,9 @@ impl Emulator {
 
     pub fn tick(&mut self) {
         // fetch instruction
-        let op = self.fetch();
-        // decode instruction
-        // execute instruction
-        self.execute(op);
+        let operation = self.fetch();
+        // decode and execute instruction
+        self.execute(operation);
     }
 
     fn fetch(&mut self) -> u16 {
@@ -117,9 +117,9 @@ impl Emulator {
     fn execute(&mut self, operation: u16) {
         // separate out hex digits (bytes) of the opcode
         let first_byte = (operation & 0xF000) >> 12;
-        let second_byte = (operation & 0xF000) >> 8;
-        let third_byte = (operation & 0xF000) >> 4;
-        let fourth_byte = operation & 0xF000;
+        let second_byte = (operation & 0x0F00) >> 8;
+        let third_byte = (operation & 0x00F0) >> 4;
+        let fourth_byte = operation & 0x000F;
         // figure out what opcode it is
         match (first_byte, second_byte, third_byte, fourth_byte) {
             // 0000 - NOP (no op)
@@ -401,12 +401,12 @@ impl Emulator {
                 self.i_register = self.v_register[x] as u16 * 5;
             }
 
-           // FX33 - I = BCD of VX
-           // stores the binary-coded decimal representation of VX, with the most significant digit in I
+            // FX33 - I = BCD of VX
+            // stores the binary-coded decimal representation of VX, with the most significant digit in I
             (0xf, _, 3, 3) => {
                 let x = second_byte as usize;
                 let vx = self.v_register[x] as f32; // not optimal, easy
-                // divide by 100 and lose the remainder
+                                                    // divide by 100 and lose the remainder
                 let hundreds = (vx / 100.0).floor() as u8;
                 // divide by 10, loce the 'ones' digit and the remainder
                 let tens = ((vx / 10.0) % 10.0).floor() as u8;
