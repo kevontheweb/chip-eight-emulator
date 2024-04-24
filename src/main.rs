@@ -56,6 +56,47 @@ fn main() {
     }
 }
 
+struct Keys {
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+    a: bool,
+    b: bool,
+    c: bool,
+}
+impl Keys {
+    fn new() -> Self {
+        Self {
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+            a: false,
+            b: false,
+            c: false,
+        }
+    }
+    fn read(rl: &prelude::RaylibHandle) -> Self {
+        let up = rl.is_key_down(raylib::consts::KeyboardKey::KEY_UP);
+        let down = rl.is_key_down(raylib::consts::KeyboardKey::KEY_DOWN);
+        let left = rl.is_key_down(raylib::consts::KeyboardKey::KEY_LEFT);
+        let right = rl.is_key_down(raylib::consts::KeyboardKey::KEY_RIGHT);
+        let a = rl.is_key_down(raylib::consts::KeyboardKey::KEY_A);
+        let b = rl.is_key_down(raylib::consts::KeyboardKey::KEY_B);
+        let c = rl.is_key_down(raylib::consts::KeyboardKey::KEY_C);
+        Self {
+            up,
+            down,
+            left,
+            right,
+            a,
+            b,
+            c,
+        }
+    }
+}
+
 ///  1D screen buffer array and iterate across it. If we find a white pixel (a true value), then
 ///  we calculate the 2D (x, y) of the screen and draw a rectangle
 fn draw_screen(emulator: &Emulator, canvas: &mut Canvas<Window>) {
