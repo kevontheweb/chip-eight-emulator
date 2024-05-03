@@ -1,3 +1,5 @@
+pub mod sound;
+
 use rand::random;
 
 pub const SCREEN_WIDTH: usize = 64;
@@ -70,6 +72,7 @@ impl Emulator {
         self.stack[self.stack_pointer as usize]
     }
 
+    #[allow(dead_code)]
     fn reset(&mut self) {
         self.program_counter = START_ADDR;
         self.ram = [0; RAM_SIZE];
@@ -100,14 +103,15 @@ impl Emulator {
         op
     }
 
-    pub fn tick_timers(&mut self) {
+    pub fn tick_timers(&mut self, buzzer: &sound::Buzzer) {
         if self.delay_timer > 0 {
             self.delay_timer -= 1;
         }
         if self.sound_timer > 0 {
             if self.sound_timer == 1 {
-                //beep
-                todo!();
+                buzzer.set(false);
+            } else {
+                buzzer.set(true);
             }
             self.sound_timer -= 1;
         }
@@ -120,31 +124,37 @@ impl Emulator {
         let second_byte = (operation & 0x0F00) >> 8;
         let third_byte = (operation & 0x00F0) >> 4;
         let fourth_byte = operation & 0x000F;
+
         // figure out what opcode it is
         match (first_byte, second_byte, third_byte, fourth_byte) {
             // 0000 - NOP (no op)
             (0, 0, 0, 0) => return,
+
             // 00E0 - CLS (clear screen)
             (0, 0, 0xe, 0) => {
                 self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
             }
+
             // 00EE - RET (return from subroutine)
             (0, 0, 0xe, 0xe) => {
                 // move the program counter to the specified address and resume execution from there
                 let return_address = self.pop();
                 self.program_counter = return_address;
             }
+
             // 1NNN - JMP NNN (jump)
             (1, _, _, _) => {
                 let jump_address = operation & 0xfff; // NNN
                 self.program_counter = jump_address;
             }
+
             // 2NNN - CALL NNN (call subroutine)
             (2, _, _, _) => {
                 let call_address = operation & 0xfff; // NNN
                 self.push(self.program_counter);
                 self.program_counter = call_address;
             }
+
             // 3XNN - SKIP NEXT IF VX == NN (if equals)
             (3, _, _, _) => {
                 let x = second_byte as usize;
@@ -153,6 +163,7 @@ impl Emulator {
                     self.program_counter += 2;
                 }
             }
+
             // 4XNN - SKIP NEXT IF VX == NN (if not equal)
             (4, _, _, _) => {
                 let x = second_byte as usize;
@@ -182,7 +193,7 @@ impl Emulator {
             (7, _, _, _) => {
                 let x = second_byte as usize;
                 let nn = (operation & 0xff) as u8; // nn
-                self.v_register[x] += nn;
+                self.v_register[x] = self.v_register[x].wrapping_add(nn);
             }
 
             // 8XY0 - VX = VY (Like the VX = NN operation, but the source value is from the VY register.)
@@ -456,5 +467,9 @@ impl Emulator {
         let start = START_ADDR as usize;
         let end = (START_ADDR as usize) + data.len();
         self.ram[start..end].copy_from_slice(data);
+    }
+
+    pub fn sound_status(&self) -> bool {
+        self.sound_timer > 0
     }
 }

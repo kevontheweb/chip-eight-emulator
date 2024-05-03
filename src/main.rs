@@ -1,6 +1,6 @@
 use chip_eight_emu::*;
 use sdl2::event::Event;
-use sdl2::keyboard::{Keycode, Scancode};
+use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
@@ -42,6 +42,9 @@ fn main() {
     canvas.clear();
     canvas.present();
 
+    let audio_context = sdl_context.audio().unwrap();
+    let buzzer = chip_eight_emu::sound::Buzzer::new(&audio_context);
+
     // Run the emulator
     let mut event_pump = sdl_context.event_pump().unwrap();
 
@@ -77,20 +80,22 @@ fn main() {
             // 10 instructions per frame
             chip_eight.tick(); //execute next instruction (move program counter)
         }
-        chip_eight.tick_timers();
+        chip_eight.tick_timers(&buzzer);
+
         draw_screen(&chip_eight, &mut canvas);
     }
 }
 
 ///  1D screen buffer array and iterate across it. If we find a white pixel (a true value), then
 ///  we calculate the 2D (x, y) of the screen and draw a rectangle
+///  TODO: vsync (wait for vblank)
 fn draw_screen(emulator: &Emulator, canvas: &mut Canvas<Window>) {
     // clear screen
     canvas.set_draw_color(Color::RGB(0, 0, 0));
     canvas.clear();
 
     let screen_buffer = emulator.get_display();
-    canvas.set_draw_color(Color::RGB(255, 255, 255));
+    canvas.set_draw_color(Color::RGB(0x0, 0xff, 0x0));
     for (i, pixel) in screen_buffer.iter().enumerate() {
         if *pixel {
             // convert index to x,y
