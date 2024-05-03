@@ -1,0 +1,115 @@
+use chip_eight_emu::*;
+use raylib::prelude::*;
+use std::env;
+use std::fs::File;
+use std::io::Read;
+
+const SCALE: u32 = 20;
+const WINDOW_WIDTH: u32 = SCREEN_WIDTH as u32 * SCALE;
+const WINDOW_HEIGHT: u32 = SCREEN_HEIGHT as u32 * SCALE;
+fn main() {
+    // parse command line arguments
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        println!("Usage: {} <file>", args[0]);
+        return;
+    }
+    let mut file = File::open(&args[1]).expect("Unable to open file, make sure it exists");
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer).unwrap();
+    let rom = buffer;
+
+    // raylib
+    let (mut rl, thread) = raylib::init()
+        .size(WINDOW_WIDTH, WINDOW_HEIGHT)
+        .title("Chip 8 Emulator")
+        .build();
+    rl.set_target_fps(60);
+
+    // Run the emulator
+    let mut chip_eight = Emulator::new();
+    chip_eight.load(&rom);
+    // let mut keys = Keys::new();
+
+    // Game loop
+    'gameloop: loop {
+        while !rl.window_should_close() {
+            let mut d = rl.begin_drawing(&thread);
+
+            // keys.read(&rl);
+            // for (i, key) in keys.to_iter().enumerate() {
+            //     chip_eight.keypress(i, key);
+            // }
+
+            match keys {
+                Some(expr) => {
+                    break 'gameloop;
+                }
+                None => {}
+            }
+        }
+        chip_eight.tick(); //execute next instruction (move program counter)
+        draw_screen(&chip_eight, &mut d);
+    }
+}
+
+struct Keys {
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+    a: bool,
+    b: bool,
+    c: bool,
+}
+impl Keys {
+    fn new() -> Self {
+        Self {
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+            a: false,
+            b: false,
+            c: false,
+        }
+    }
+    fn read(rl: &prelude::RaylibHandle) -> Self {
+        let up = rl.is_key_down(raylib::consts::KeyboardKey::KEY_UP);
+        let down = rl.is_key_down(raylib::consts::KeyboardKey::KEY_DOWN);
+        let left = rl.is_key_down(raylib::consts::KeyboardKey::KEY_LEFT);
+        let right = rl.is_key_down(raylib::consts::KeyboardKey::KEY_RIGHT);
+        let a = rl.is_key_down(raylib::consts::KeyboardKey::KEY_A);
+        let b = rl.is_key_down(raylib::consts::KeyboardKey::KEY_B);
+        let c = rl.is_key_down(raylib::consts::KeyboardKey::KEY_C);
+        Self {
+            up,
+            down,
+            left,
+            right,
+            a,
+            b,
+            c,
+        }
+    }
+}
+
+///  1D screen buffer array and iterate across it. If we find a white pixel (a true value), then
+///  we calculate the 2D (x, y) of the screen and draw a rectangle
+fn draw_screen(
+    emulator: &Emulator,
+    canvas: &mut raylib::prelude::RaylibDrawHandle,
+) {
+    // clear screen
+    let screen_buffer = emulator.get_display();
+    canvas.clear_background(Color::BLACK);
+
+    for (i, pixel) in screen_buffer.iter().enumerate() {
+        if *pixel {
+            // convert index to x,y
+            let x = (i % SCREEN_WIDTH) as u32;
+            let y = (i / SCREEN_WIDTH) as u32;
+            canvas.draw_rectangle((x * SCALE) as i32, (y * SCALE) as i32, SCALE, SCALE, Color::WHITE);
+        }
+    }
+}
